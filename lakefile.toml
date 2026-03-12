@@ -1,0 +1,11 @@
+name = "autobahn-veil"
+version = "0.1.0"
+defaultTargets = ["autobahn-veil"]
+
+[[lean_lib]]
+name = "autobahn_veil"
+
+[[require]]
+name = "veil"
+git = "https://github.com/verse-lab/veil.git"
+rev = "main"
