@@ -8,19 +8,25 @@ type nodeset
 type vertexset
 type address
 
+
 -- instance round from an abstract type to Nat
 abbrev round := Nat
 abbrev count := Nat
 open Nat
 
-
-structure vertex where
-  round: round
-  source: address
-  block: block
-  strong: vertexset
-  weak: vertexset
-deriving DecidableEq
+type vertex
+-- structure vertex where
+--   round: round
+--   source: address
+--   block: block
+--   strong: vertexset
+--   weak: vertexset
+relation vertex'fields
+  (v: vertex)
+  (r: round)
+  (b: block)
+  (strong: vertexset)
+  (weak: vertexset)
 
 class VertexSet (vertex: Type) (vset: Type) where
   is_empty (s: vset): Prop
@@ -34,16 +40,21 @@ class VertexSet (vertex: Type) (vset: Type) where
   supermajority_nonempty:
     ∀ (s : vset), supermajority s → ¬ is_empty s
 
-instantiate vset : VertexSet (vertex address block vertexset) vertexset
+instantiate vset : VertexSet vertex vertexset
 
 variable (is_byz : address → Prop)
 instantiate nset : NodeSet address is_byz nodeset
 open NodeSet
 
 
-structure DAG_view where
-  current_round_vertices: vertexset
-  past_round: Option DAG_view
+-- structure DAG'view where
+--   current'round'vertices: vertexset
+--   past'round: Option DAG'view
+type DAG'view
+relation DAG'view'fields
+  (view: DAG'view)
+  (current: vertexset)
+  (past: Option DAG'view)
 
 
 relation current_round (a: address) (r: round)
@@ -52,51 +63,62 @@ relation current_round (a: address) (r: round)
 -- so maybe we need to pass f as an argument to every action?
 -- individual f : Nat
 
--- how about individual dag_view_map : Std.HashMap round (DAG_view vertexset)
-relation has_view (a: address) (v: DAG_view vertexset)
+-- how about individual dag'view'map : Std.HashMap round (DAG'view vertexset)
+relation has'view (a: address) (v: DAG'view)
+variable (empty'view: DAG'view)
+
 
 
 #gen_state
 
-ghost relation ready_for_next_round (a: address) (v: DAG_view vertexset) (r: round)
+ghost relation ready'for'next'round
+  (a: address)
+  (v: DAG'view)
+  (r: round)
+  (s: vertexset)
+  (p: Option DAG'view)
   := current_round a r
-  ∧ has_view a v
-  ∧ vset.supermajority v.current_round_vertices
+  ∧ has'view a v
+  ∧ DAG'view'fields v s p
+  ∧ vset.supermajority s
 
 #print State
 
 after_init {
   current_round A 0 := True
   current_round A N := False
-  -- has_view A (DAG_view.mk vset.empty Option.none) := True
-  -- has_view A V := False
+  has'view A empty'view := True
+  has'view A V := False
+  -- view and vertex construction
+  vertex'fields V R B S W := False
+  DAG'view'fields empty'view C Option.none := True
+  DAG'view'fields V C P := False
 }
 
--- action advance_round (a: address) (r: round) (v: DAG_view vertexset) = {
---   require current_round a r
---   require has_view a v
---   require vset.supermajority v.current_round_vertices
+-- action advance_round (a: address) (r: round) (v: DAG'view vertexset)= {
+--   require ready'for'next'round a r v
 --   current_round a r := False
 --   current_round a (r+1) := True
---   has_view a v := False
---   has_view a (DAG_view.mk vset.empty v) := True
+--   has'view a v := False
+--   has'view a (DAG'view.mk vset.empty v) := True
 -- }
 
-safety [round_exist]
-  ( ∀ (a: address), ∃ (r: round),
-    current_round a r )
-safety [round_unique]
-  ( ∀ (a: address) (r1 r2: round),
-    current_round a r1 ∧ current_round a r2
-    → r1 = r2)
+-- safety [round_exist_unique]
+--   ( ∀ (a: address), ∃ (r: round),
+--     current_round a r ) ∧
+--   ( ∀ (a: address) (r1 r2: round),
+--     current_round a r1 ∧ current_round a r2
+--     → r1 = r2)
 
--- safety [view_exist]
---   ( ∀ (a: address), ∃ (v: DAG_view vertexset),
---     has_view a v)
--- safety [view_unique]
---   ( ∀ (a: address) (v1 v2: DAG_view vertexset),
---     has_view a v1 ∧ has_view a v2
+-- safety [view_exist_unique]
+--   ( ∀ (a: address), ∃ (v: DAG'view vertexset),
+--     has'view a v) ∧
+--   ( ∀ (a: address) (v1 v2: DAG'view vertexset),
+--     has'view a v1 ∧ has'view a v2
 --     → v1 = v2)
+
+-- view and vertex work like structures
+-- safety [vertex_structure]
 
 #check_invariants
 
