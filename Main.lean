@@ -91,7 +91,7 @@ after_init {
   has'view A V := False
   -- view and vertex construction
   vertex'fields V R B S W := False
-  DAG'view'fields empty'view C Option.none := True
+  DAG'view'fields empty'view vset.empty Option.none := True
   DAG'view'fields V C P := False
 }
 
