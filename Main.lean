@@ -1,196 +1,99 @@
 import Veil
 import Examples.Other.ReliableBroadcast
 
-#print ReliableBroadcast.State
+veil module DagRiderBroadcast
 
-veil module DagRider'ReliableBroadcast
-
-type nodeset
-type address
-type round
 type block
-type vertex
+type nodeset
+type vertexset
+type address
+
+-- instance round from an abstract type to Nat
+abbrev round := Nat
+abbrev count := Nat
+open Nat
+
+
+structure vertex where
+  round: round
+  source: address
+  block: block
+  strong: vertexset
+  weak: vertexset
+deriving DecidableEq
+
+class VertexSet (vertex: Type) (vset: Type) where
+  is_empty (s: vset): Prop
+  member (a: vertex) (s: vset) : Prop
+  empty: vset
+
+  supermajority (s : vset): Prop
+
+  empty_is_empty:
+    is_empty empty
+  supermajority_nonempty :
+    ∀ (s : vset), supermajority s → ¬ is_empty s
+
+instantiate vset : VertexSet (vertex address block vertexset) vertexset
 
 variable (is_byz : address → Prop)
-
 instantiate nset : NodeSet address is_byz nodeset
 open NodeSet
 
-relation vertex_msg
-  (creator : address)
-  (dst : address)
-  (r : round)
-  (v : vertex)
-  (b : block)
 
-relation strong_edge
-  (v : vertex)
-  (u : vertex)
+structure DAG'view where
+  current'round'vertices: vertexset
+  past'round: Option DAG'view
 
-relation weak_edge
-  (v : vertex)
-  (u : vertex)
 
-relation v_creator
-  (v : vertex)
-  (creator : address)
+relation current_round (a: address) (r: round)
 
-relation v_round
-  (v : vertex)
-  (r : round)
+-- seems impossible to correctly initialize a individual f,
+-- so maybe we need to pass f as an argument to every action?
+-- individual f : Nat
 
-relation v_block
-  (v : vertex)
-  (b : block)
+-- how about individual dag'view'map : Std.HashMap round (DAG'view vertexset)
+relation has'view (a: address) (v: DAG'view vertexset)
 
-relation broadcasted
-  (n : address)
-  (r : round)
-  (v : vertex)
-
-relation delivered
-  (n : address)
-  (v : vertex)
-
-relation inserted
-  (n : address)
-  (v : vertex)
-
-relation ready_for_round
-  (n : address)
-  (r : round)
-
-relation current_round
-  (n : address)
-  (r : round)
 
 #gen_state
 
+ghost relation ready'for'next'round (a: address) (v: DAG'view vertexset) (r: round)
+  := current_round a r
+  ∧ has'view a v
+  ∧ vset.supermajority v.current'round'vertices
+
+#print State
+
 after_init {
-  vertex_msg C D R V B := False;
-  strong_edge V U := False;
-  weak_edge V U := False;
-  v_creator V C := False;
-  v_round V R := False;
-  v_block V B := False;
-  broadcasted N R V := False;
-  delivered N V := False;
-  inserted N V := False;
-  ready_for_round N R := False;
-  current_round N R := False
+  current_round A 0 := True
+  current_round A N := False
+  has'view A (DAG'view.mk vset.empty Option.none) := True
+  has'view A V := False
 }
 
-internal transition byz = fun st st' =>
-  (∀ (creator dst : address) (r : round) (v : vertex) (b : block),
-      (¬ is_byz creator ∧ (st.vertex_msg creator dst r v b ↔ st'.vertex_msg creator dst r v b))
-      ∨
-      (is_byz creator ∧ (st.vertex_msg creator dst r v b → st'.vertex_msg creator dst r v b)))
-  ∧
-  (∀ (v u : vertex),
-      (st.strong_edge v u → st'.strong_edge v u))
-  ∧
-  (∀ (v u : vertex),
-      (st.weak_edge v u → st'.weak_edge v u))
-  ∧
-  (∀ (v : vertex) (creator : address),
-      (st.v_creator v creator → st'.v_creator v creator))
-  ∧
-  (∀ (v : vertex) (r : round),
-      (st.v_round v r → st'.v_round v r))
-  ∧
-  (∀ (v : vertex) (b : block),
-      (st.v_block v b → st'.v_block v b))
-  ∧
-  (st.broadcasted = st'.broadcasted)
-  ∧
-  (st.delivered = st'.delivered)
-  ∧
-  (st.inserted = st'.inserted)
-  ∧
-  (st.ready_for_round = st'.ready_for_round)
-  ∧
-  (st.current_round = st'.current_round)
-
-action init_round0 (n : address) (r : round) = {
-  require ¬ is_byz n;
-  require ¬ current_round n r;
-  current_round n r := True
+action advance_round (a: address) (r: round) (v: DAG'view vertexset)= {
+  require ready'for'next'round a r v
+  current_round a r := False
+  current_round a (r+1) := True
+  has'view a v := False
+  has'view a (DAG'view.mk vset.empty v) := True
 }
 
-action broadcast_vertex
-  (n : address)
-  (r : round)
-  (v : vertex)
-  (b : block) = {
-  require ¬ is_byz n;
-  require current_round n r;
-  require ¬ broadcasted n r v;
-  require ∀ V, ¬ broadcasted n r V;
-  v_creator v n := True;
-  v_round v r := True;
-  v_block v b := True;
-  vertex_msg n DST r v b := True;
-  broadcasted n r v := True
-}
+safety [round_only]
+  ( ∀ (a: address), ∃ (r: round),
+    current_round a r ) ∧
+  ( ∀ (a: address) (r1 r2: round),
+    current_round a r1 ∧ current_round a r2
+    → r1 = r2)
 
-action add_strong_edge
-  (n : address)
-  (v u : vertex) = {
-  require ¬ is_byz n;
-  require inserted n u;
-  require delivered n v;
-  require strong_edge v u = False;
-  strong_edge v u := True
-}
+safety [view_only]
+  ( ∀ (a: address), ∃ (v: DAG'view vertexset),
+    has'view a v) ∧
+  ( ∀ (a: address) (v1 v2: DAG'view vertexset),
+    has'view a v1 ∧ has'view a v2
+    → v1 = v2)
 
-action add_weak_edge
-  (n : address)
-  (v u : vertex) = {
-  require ¬ is_byz n;
-  require inserted n u;
-  require delivered n v;
-  require weak_edge v u = False;
-  require ¬ strong_edge v u;
-  weak_edge v u := True
-}
+#check_invariants
 
-action deliver_vertex
-  (n creator : address)
-  (r : round)
-  (v : vertex)
-  (b : block) = {
-  require vertex_msg creator n r v b;
-  delivered n v := True
-}
-
-action insert_vertex
-  (n : address)
-  (v : vertex) = {
-  require delivered n v;
-  require ∀ u, strong_edge v u → inserted n u;
-  require ∀ u, weak_edge v u → inserted n u;
-  inserted n v := True
-}
-
-action mark_ready
-  (n : address)
-  (r_next r_prev : round) = {
-  require current_round n r_prev;
-  require ∃ (q : nodeset), nset.supermajority q ∧
-    ∀ (u_creator : address),
-      nset.member u_creator q →
-      ∃ (u : vertex), inserted n u ∧ v_creator u u_creator ∧ v_round u r_prev;
-  ready_for_round n r_next := True
-}
-
-action advance_round
-  (n : address)
-  (r_prev r_next : round) = {
-  require current_round n r_prev;
-  require ready_for_round n r_next;
-  require ¬ current_round n r_next;
-  current_round n r_prev := False;
-  current_round n r_next := True
-}
-
-end DagRider'ReliableBroadcast
+end DagRiderBroadcast
