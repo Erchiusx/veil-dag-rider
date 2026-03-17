@@ -16,7 +16,7 @@ type vertex
 class Vertex
   (vertex address block vertexset: Type)
 where
-  round: vertex → round
+  roundOf: vertex → round
   source: vertex → address
   block: vertex → block
   strong: vertex → vertexset
@@ -29,27 +29,18 @@ class VertexSet
   [v_: Vertex vertex address block vset]
 where
   member (a: vertex) (s: vset) : Prop
-  empty: vset
-  empty_with_round: round → vset
-  round: vset → round
-
-  empty_with_round_def:
-    ( ∀ (r: round)
-      , round (empty_with_round r) = r
-    ) ∧
-    ( ∀ (a: vertex) (r: round)
-      , ¬ member a (empty_with_round r)
-    )
+  empty: round → vset
+  roundOf: vset → round
 
   insert (a: vertex) (s: vset)
-    (alignment: s = empty ∨ v_.round a = round s)
+    (alignment: v_.roundOf a = roundOf s)
     : vset
 
   insert_contains_a_and_s:
     ∀ (a: vertex)
       (s: vset)
       (alignment:
-        s = empty ∨ v_.round a = round s
+        v_.roundOf a = roundOf s
       )
     , member a (insert a s alignment)
     ∧ ∀ (b: vertex)
@@ -61,10 +52,14 @@ where
   round_alignment:
     ∀ (a: vertex) (s: vset)
     , member a s
-    → v_.round a = round s
+    → v_.roundOf a = roundOf s
 
-  empty_is_not_supermajority: ¬ supermajority empty
-  empty_is_empty: ∀ (a: vertex), ¬ member a empty
+  empty_is_not_supermajority:
+    ∀ (r: round)
+    , ¬ supermajority (empty r)
+  empty_is_empty:
+    ∀ (a: vertex) (r: round)
+    , ¬ member a (empty r)
 
 instantiate vset : VertexSet vertex vertexset address block
 
@@ -79,7 +74,7 @@ where
     ∀ (p: path)
       (v1 v2: vertex)
     , (member v1 p ∧ member v2 p)
-    → v_.round v1 ≠ v_.round v2
+    → v_.roundOf v1 ≠ v_.roundOf v2
 
   top: path → vertex
   bottom: path → vertex
@@ -103,108 +98,62 @@ where
   round_bound:
     ∀ (p: path) (v: vertex)
     , member v p
-    → v_.round v ≥ v_.round (bottom p)
-    ∧ v_.round v ≤ v_.round (top p)
-
-
+    → v_.roundOf v ≥ v_.roundOf (bottom p)
+    ∧ v_.roundOf v ≤ v_.roundOf (top p)
 instantiate path_: Path path vertex address block vertexset
+
+type vcache
+class VCache (vcache vertex: Type) where
+  member: vertex → vcache → Prop
+  empty: vcache
+  insert (v: vertex) (c: vcache) (membership: ¬ member v c): vcache
+  delete (v: vertex) (c: vcache) (membership: member v c): vcache
+
+  insertion:
+    ∀ (v: vertex) (c: vcache) (h: ¬ member v c)
+    , member v (insert v c h)
+
+  deletion:
+    ∀ (v: vertex) (c: vcache) (h: member v c)
+    , ¬ member v (delete v c h)
+
+  left_invert:
+    ∀ (v: vertex) (c: vcache) (h: member v c)
+    , insert v (delete v c h) (deletion v c h) = c
+
+  right_invert:
+    ∀ (v: vertex) (c: vcache) (h: ¬ member v c)
+    , delete v (insert v c h) (insertion v c h) = c
+
+  empty_is_empty:
+    ∀ (v: vertex)
+    , ¬ member v empty
+
+  select (c: vcache) (h: c ≠ empty):
+    Σ (v: vertex) (c: vcache), member v c
+
+instantiate vc: VCache vcache vertex
 
 variable (is_byz : address → Prop)
 instantiate nset : NodeSet address is_byz nodeset
 open NodeSet
 
-type view
-class View
-  (view vertex vertexset address block: Type)
-  [v_: Vertex vertex address block vertexset]
-  [vset: VertexSet vertex vertexset address block]
-where
-  current: view → vertexset
-  past: view → Option view
-  round: view → round
-
-  next (v: view): view
-
-  empty: view
-  empty_view_def:
-    current empty = vset.empty
-    ∧ past empty = none
-    ∧ round empty = 1
-
-  only_empty_view_has_no_past:
-    ∀ (v: view)
-    , past v = none ∨ round v = 1
-    → current v = vset.empty
-
-  next_def:
-    ∀ (v: view)
-    , current (next v) = vset.empty
-    ∧ past (next v) = some v
-    ∧ round (next v) = round v + 1
-
-  height_view:
-    ∀ (v: view)
-    , match past v with
-      | none => round v = 1
-      | some v' => round v = round v' + 1
-
-  positivity:
-    ∀ (v: view)
-    , round v > 0
-
-  round_alignment:
-    ∀ (v: view)
-    , current v = vset.empty
-    ∨ round v = vset.round (current v)
-
-instantiate view_: View view vertex vertexset address block
-
 relation current_round (a: address) (r: round)
 
-relation has'view (a: address) (v: view)
 relation view'slice (a: address) (s: vertexset)
 relation received (a: address) (v: vertex)
+relation cached (a: address) (c: vcache)
 #gen_state
 
 #print State
 
-def vertex'in'view
-  (v: vertex) (view': Option view): Prop :=
-  match view' with
-  | none => False
-  | some view
-    => vset.member v (view_.current view)
-    ∨ vertex'in'view v (view_.past view)
-  termination_by match view' with
-    | none => 0
-    | some v => view_.round v
-  decreasing_by {
-    cases h: view_.past v' with
-    | none =>
-        simp
-        exact (view_.positivity v')
-    | some v1 =>
-        simp
-        have h1 := view_.height_view v'
-        rw [h] at h1
-        simp at h1
-        rw [h1]
-        simp
-  }
-
-def path'in'dag (p: path) (v: view): Prop :=
-  ∀ (v': vertex)
-  , path_.member v' p
-  → vset.member v' (view_.current v)
-  ∨ vertex'in'view block vertexset address vertex view v' (view_.past v)
-
 after_init {
   current_round A N         := False
   current_round A 0         := True
-  has'view A V              := False
-  has'view A view_.empty    := True
   received A V              := False
   view'slice A S            := False
+  cached A C                 := False
+  cached A vc.empty          := True
 }
 
 action advance_round_slice
@@ -214,98 +163,115 @@ action advance_round_slice
   require
     ∀ (s: vertexset)
     , view'slice a s
-    ∧ vset.round s = r
+    ∧ vset.roundOf s = r
     → vset.supermajority s
   current_round a r := False
   current_round a (r + 1) := True
+  view'slice a (vset.empty (r+1)) := True
 }
-
-action advance_round
-  (a: address)
-  (r: round)
-  (v: view) = {
-  require current_round a r
-  require has'view a v
-  require vset.supermajority (view_.current v)
-  require
-    ∃ (v': vertex)
-    , vset.member v' (view_.current v)
-    ∧ v_.source v' = a
-  current_round a r := False
-  current_round a (r + 1) := True
-  has'view a v := False
-  has'view a (view_.next v) := True
-}
-
-
 
 action send
-  (v: vertex)
   (a: address)
-  (vi: view)
-  (vi': view) = {
-  -- check that the sender owns the view and the vertex
-  require has'view a vi
-  require v_.source v = a
-  -- the vertex differs from the vertices in the view
+  (last: vertexset)
+  (current: vertexset)
+  (v: vertex)
+  (r: round) = {
+  require current_round a r
+  require vset.roundOf last + 1 = r
+  require vset.roundOf current = r
+  require vset.roundOf current = v_.roundOf v
+  let h
+    : vset.roundOf current = v_.roundOf v
+    := sorry -- by requirement
+  require view'slice a last
+  require view'slice a current
   require
     ∀ (v': vertex)
-    , vset.member v' (view_.current vi)
+    , vset.member v' last
     → v_.source v' ≠ a
-  -- the strong set should be the parent view's all edges
-  require v_.strong v = match view_.past vi with
-    | none => vset.empty
-    | some past_view => view_.current past_view
-  let vertex'in'view'judgement :=
-    vertex'in'view block vertexset address vertex view
+  require v_.strong v = last
   require
-    ∀ (v0: vertex)
-    , vset.member v0 (v_.weak v)
+    ∀ (v': vertex)
+    , vset.member v' (v_.weak v)
     ↔ ¬ ∃ (p: path)
-      , path_.top p = v
-      ∧ path_.bottom p = v0
-      ∧ ∀ (v1: vertex)
-        , path_.member v1 p
-        → (v1 ≠ v0 ∧ vset.member v1 (v_.weak v))
-        ∨ vertex'in'view'judgement v1 (some vi)
-  /- the vertex should be from the current round
-    here we require this alignment, and we will use it as `sorry`
-    in the insertion
-  -/
-  require v_.round v = view_.round vi
-  -- all checks passed, we can send the vertex
-
-  -- vi' is the modified view after vi
-  require
-    view_.current vi'
-    = vset.insert v (view_.current vi)
-    ( by {
-      have round_alignment
-        : v_.round v = view_.round vi := by sorry
-      have h := view_.round_alignment vi
-      rw [round_alignment]
-      cases h with
-      | inl h1 =>
-          rw [h1]
-          simp
-      | inr h2 =>
-          rw [h2]
-          simp
-    })
-  require
-    view_.past vi' = some vi
-
-  has'view a vi := False
-  has'view a vi' := True
+        , (path_.top p) = v
+        ∧ (path_.bottom p) = v'
+        ∧ ∀ (mid: vertex)
+          , mid = v
+          ∨ mid = v'
+          ∨ vset.member mid (v_.weak v)
+          ∨ ∃ (s: vertexset)
+            , view'slice a s
+            ∧ vset.member mid s
+  view'slice a current := False
+  view'slice a
+    ( vset.insert v current ( by rw[h] ) ) := True
 }
+
+action cache
+  (a: address)
+  (v: vertex)
+  (c: vcache) = {
+  require cached a c
+  if ¬ vc.member v c
+    then
+      let h : ¬ vc.member v c := sorry
+      -- here if we use if h: ¬ vc.member v c
+      -- then h becomes a weird assumption rather than
+      -- being ¬ vc.member v c,
+      -- which is quite strange
+      cached a c := False
+      cached a (vc.insert v c ( by
+        exact h
+      )) := True
+}
+
+action gc (a: address) (c: vcache) = {
+  if ¬ (c = vc.empty)
+    then
+      let h: ¬ (c = vc.empty) := sorry
+      let h'
+        : ∃ (v: vertex), vc.member v c
+        := sorry
+      match h' with
+      | intro v' hv => return ()
+}
+
 
 action receive
   (a: address)
+  (r: round)
   (v: vertex)
-  (vi: view) = {
-  require has'view a vi
+  (s: vertexset)
+  (c: vcache)= {
+  require cached a c
+  if
+    ∃ (v': vertex)
+    , received a v'
+    ∧ v_.roundOf v = v_.roundOf v'
+    then
+      return ()
+  if
+    ∃ (v': vertex)
+    , (vset.member v' (v_.strong v) ∨ vset.member v' (v_.weak v))
+    ∧ received a v' = False
+    then
+      cache a v c
+      return ()
+  if v_.roundOf v > r
+    then
+      cache a v c
+      return ()
+
+  require vset.roundOf s = v_.roundOf v
+  let h : vset.roundOf s = v_.roundOf v := sorry
+  view'slice a s := False
+  view'slice a (vset.insert v s ( by rw [h] )) := True
+
+  gc a
 
 }
+
 
 #gen_spec
 
