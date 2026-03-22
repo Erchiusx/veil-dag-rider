@@ -134,17 +134,16 @@ relation decidedWave (i: address) (w: wave)
 relation deliveredVertex (i: address) (v: vertex)
 relation getWaveVertexLeader (i: address) (w: wave) (v: vertex)
 
-type order
-instantiate toto: TotalOrder order
-instantiate tota: TotalOrder address
-relation a_deliver_at (i: address) (m: block) (r: round) (o: order)
+relation a_deliver_at (i: address) (m: block) (r: round) (w: wave)
+
+instantiate tot: TotalOrder address
 set_option linter.dupNamespace false
 #gen_state
 
 syntax term:max "__sig": term
 macro_rules
   | `($f __sig) =>
-      `($f address nodeset block vertex vertexset is_byz path order)
+      `($f address nodeset block vertex vertexset is_byz path)
 
 after_init {
   current_round A R           := False
@@ -157,7 +156,7 @@ after_init {
   buffer A V                  := False
   in'DAG A V                  := False
   a_bcast I B R               := False
-  a_deliver_at I B R O        := False
+  a_deliver_at I B R W        := False
   decidedWave I W             := False
   decidedWave I 0             := True
   deliveredVertex I V         := False
@@ -246,12 +245,7 @@ internal transition global'perfect'coin = fun st st'
   -/
   => True
   ∧ ( ∀ (i: address) (w: wave)
-      , ( (¬ is_byz i)
-        ∧ (st.choose_leader i w ↔ st'.choose_leader i w)
-        )
-      ∨ ( (is_byz i)
-        ∧ (st.choose_leader i w → st'.choose_leader i w)
-        )
+      , st.choose_leader i w → st'.choose_leader i w
     )
   /-
     glboal perfect coin will assign one leader once
@@ -528,8 +522,8 @@ def wave_ready
   → address
   → Prop := fun st st' w i => True
   ∧ ( ∀ (v: vertex)
-      , ( st.getWaveVertexLeader i w v
-        ∧ ∃ (s: vertexset)
+      , st.getWaveVertexLeader i w v
+        → if ∃ (s: vertexset)
           , vset.supermajority s
           ∧ ∀ (vs: vertex)
             , st.in'DAG i vs
@@ -537,8 +531,7 @@ def wave_ready
             ∧ exists_path_where
                 (fun _ vp => st.in'DAG i vp)
                 vs v
-        )
-      → ( ∀ (leaders: vertexset)
+      then ( ∀ (leaders: vertexset)
           , ( vset.member v leaders
             ∧ ( ∀ (v': vertex)
                 , vset.member v' leaders
@@ -561,37 +554,13 @@ def wave_ready
                 ∧ (st.in'DAG i v)
                 ∧ (vset.member l leaders)
                 ∧ exists_path l v
-                → ∃ (o: order)
-                  , st'.a_deliver_at i (vtx.block v) (vtx.roundOf v) o
-                  ∧ st'.deliveredVertex i v
-                  ∧ ∀ (i_: address) (b_: block) (r_: round) (o_: order)
-                    , ( st.a_deliver_at i_ b_ r_ o_
-                      → toto.le o_ o
-                      )
+                → st'.a_deliver_at i (vtx.block v) (vtx.roundOf v) w
+                ∧ st'.deliveredVertex i v
               )
           )
         )
-    )
-  ∧ ( ∀ (i: address) (b1 b2: block) (r1 r2: round) (o1 o2: order)
-      , (st.a_deliver_at i b1 r1 o1 → st'.a_deliver_at i b1 r1 o1)
-      ∧ ( st'.a_deliver_at i b1 r1 o1
-        ∧ st'.a_deliver_at i b2 r2 o2
-        ∧ ( ¬ ∃ (o1' o2': order)
-              , st.a_deliver_at i b1 r1 o1'
-              ∨ st.a_deliver_at i b2 r2 o2'
-          )
-        → ( toto.le o1 o2
-          ↔ ( ∀ (v1 v2: vertex)
-              , st.in'DAG i v1 ∧ st.in'DAG i v2
-              ∧ (vtx.block v1 = vtx.block v2)
-              ∧ ( (vtx.roundOf v1 < vtx.roundOf v2)
-                ∨ ( vtx.roundOf v1 = vtx.roundOf v2
-                  ∧ tota.le (vtx.source v1) (vtx.source v2)
-                  )
-                )
-            )
-          )
-        )
+        else  st'.a_deliver_at i = st.a_deliver_at i
+            ∧ st'.deliveredVertex i = st.deliveredVertex i
     )
 
 internal transition advance_round_ = fun st st' => True
@@ -610,16 +579,17 @@ internal transition advance_round_ = fun st st' => True
               then
                 ∀ (w: wave)
                 , 4 * w = r
-                → (wave_ready address nodeset block vertex vertexset is_byz path order)
-                  st st' w i
-                ∧ st'.decidedWave i w
-                ∧ ∀ (w': wave)
-                  , w' ≠ w
-                  → ¬ st'.decidedWave i w'
+                → st'.choose_leader i w = True
+                -- → (wave_ready address nodeset block vertex vertexset is_byz path)
+                --   st st' w i
+                -- ∧ st'.decidedWave i w
+                -- ∧ ∀ (w': wave)
+                --   , w' ≠ w
+                --   → ¬ st'.decidedWave i w'
               else
-                ∀ (b: block) (r: round) (o: order)
-                , st.a_deliver_at i b r o
-                ↔ st'.a_deliver_at i b r o
+                ∀ (b: block) (r: round) (w: wave)
+                , st.a_deliver_at i b r w
+                ↔ st'.a_deliver_at i b r w
          else st'.current_round i = st.current_round i
             ∧ st'.a_deliver_at i = st.a_deliver_at i
     )
@@ -665,16 +635,29 @@ invariant [round_nonempty]
 --   ∧ 4 * r > w
 --   → choose_leader i w
 
+def lete: Nat → Nat → Prop → Prop := fun u v p =>
+  (u < v) ∨ (u = v ∧ p)
+
 invariant [a_bcast_tot]
-  ∀ (i: address) (j: address)
-    (m: block) (m': block) (r: round) (r': round)
-    (oi: order) (oi': order) (oj: order) (oj': order)
+  ∀ (i j: address)
+    (m m': block) (r r': round)
+    (wi wi' wj wj': wave)
   , ( (¬ is_byz i) ∧ (¬ is_byz j)
-  ∧ (a_deliver_at i m r oi)
-  ∧ (a_deliver_at i m' r' oi')
-  ∧ (a_deliver_at j m r oj)
-  ∧ (a_deliver_at j m' r' oj') )
-  → (toto.le oi oi' ↔ toto.le oj oj')
+  ∧ (a_deliver_at i m r wi)
+  ∧ (a_deliver_at i m' r' wi')
+  ∧ (a_deliver_at j m r wj)
+  ∧ (a_deliver_at j m' r' wj') )
+  ∧ ( ∃ (k k': address)
+      , a_bcast k m r
+      ∧ a_bcast k' m' r'
+    )
+  → ( ∀ (k k': address)
+      , a_bcast k m r
+      ∧ a_bcast k' m' r'
+      → ( (lete wi wi' $ lete r r' $ tot.le k k')
+        ↔ (lete wj wj' $ lete r r' $ tot.le k k')
+        )
+    )
 
 -- invariant [block_consistency]
 --   ∀ (v: vertex) (u: vertex) (i: address) (j: address)
@@ -792,108 +775,105 @@ invariant [a_bcast_tot]
 
 #check_invariants
 
-@[invProof]
-theorem advance_round__round_nonempty :
-    ∀ (st : @State address nodeset block vertex vertexset is_byz path order),
-      (@System address address_dec address_ne nodeset nodeset_dec nodeset_ne block block_dec
-              block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec vertexset_ne is_byz
-              nset vtx vset path path_dec path_ne path_ order order_dec order_ne toto
-              tota).assumptions
-          st →
-        (@System address address_dec address_ne nodeset nodeset_dec nodeset_ne block block_dec
-                block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec vertexset_ne is_byz
-                nset vtx vset path path_dec path_ne path_ order order_dec order_ne toto tota).inv
-            st →
-          (@DAG.advance_round_.ext address address_dec address_ne nodeset nodeset_dec nodeset_ne
-              block block_dec block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec
-              vertexset_ne is_byz nset vtx vset path path_dec path_ne path_ order order_dec
-              order_ne toto tota)
-            st fun _ (st' : @State address nodeset block vertex vertexset is_byz path order) =>
-            @DAG.round_nonempty address address_dec address_ne nodeset nodeset_dec nodeset_ne
-              block block_dec block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec
-              vertexset_ne is_byz nset vtx vset path path_dec path_ne path_ order order_dec
-              order_ne toto tota st' :=
-  by {
-    intros _ _ invs _ tr
-    simp
-    intros _ _ _ _ _ _ _ _ i h
-    rcases invs with ⟨_, st_round_nonempty⟩
-    have prev := st_round_nonempty i h
-    cases prev with
-    | intro r hi =>
-      have focus := tr i r hi h
-      split at focus
-      . rcases focus with ⟨focus, _⟩
-        have focus := focus (r+1)
-        use (r+1)
-        simp at focus
-        exact focus
-      . use r
-        rcases focus with ⟨lfocus, _⟩
-        have focus := lfocus r
-        simp [focus]
-        exact hi
-  }
+-- @[invProof]
+-- theorem advance_round__round_nonempty :
+--     ∀ (st : @State address nodeset block vertex vertexset is_byz path),
+--       (@System address address_dec address_ne nodeset nodeset_dec nodeset_ne block block_dec
+--               block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec vertexset_ne is_byz
+--               nset vtx vset path path_dec path_ne path_ tot).assumptions
+--           st →
+--         (@System address address_dec address_ne nodeset nodeset_dec nodeset_ne block block_dec
+--                 block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec vertexset_ne is_byz
+--                 nset vtx vset path path_dec path_ne path_ tot).inv
+--             st →
+--           (@DAG.advance_round_.ext address address_dec address_ne nodeset nodeset_dec nodeset_ne
+--               block block_dec block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec
+--               vertexset_ne is_byz nset vtx vset path path_dec path_ne path_)
+--             st fun _ (st' : @State address nodeset block vertex vertexset is_byz path) =>
+--             @DAG.round_nonempty address address_dec address_ne nodeset nodeset_dec nodeset_ne
+--               block block_dec block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec
+--               vertexset_ne is_byz nset vtx vset path path_dec path_ne path_ tot st' :=
+--   by {
+--     intros _ _ invs _ tr
+--     simp
+--     intros _ _ _ _ _ _ _ _ i h
+--     rcases invs with ⟨_, st_round_nonempty⟩
+--     have prev := st_round_nonempty i h
+--     cases prev with
+--     | intro r hi =>
+--       have focus := tr i r hi h
+--       split at focus
+--       . rcases focus with ⟨focus, _⟩
+--         have focus := focus (r+1)
+--         use (r+1)
+--         simp at focus
+--         exact focus
+--       . use r
+--         rcases focus with ⟨lfocus, _⟩
+--         have focus := lfocus r
+--         simp [focus]
+--         exact hi
+--   }
 
-@[invProof]
-  theorem advance_round__a_bcast_tot :
-      ∀ (st : @State address nodeset block vertex vertexset is_byz path order),
-        (@System address address_dec address_ne nodeset nodeset_dec nodeset_ne block block_dec
-                block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec vertexset_ne is_byz
-                nset vtx vset path path_dec path_ne path_ order order_dec order_ne toto
-                tota).assumptions
-            st →
-          (@System address address_dec address_ne nodeset nodeset_dec nodeset_ne block block_dec
-                  block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec vertexset_ne is_byz
-                  nset vtx vset path path_dec path_ne path_ order order_dec order_ne toto tota).inv
-              st →
-            (@DAG.advance_round_.ext address address_dec address_ne nodeset nodeset_dec nodeset_ne
-                block block_dec block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec
-                vertexset_ne is_byz nset vtx vset path path_dec path_ne path_ order order_dec
-                order_ne toto tota)
-              st fun _ (st' : @State address nodeset block vertex vertexset is_byz path order) =>
-              @DAG.a_bcast_tot address address_dec address_ne nodeset nodeset_dec nodeset_ne block
-                block_dec block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec vertexset_ne
-                is_byz nset vtx vset path path_dec path_ne path_ order order_dec order_ne toto tota
-                st' :=
-    by {
-      intros
-        st has inv st' tr
-        _ _ _ _ _ _ _ _
-        i j m m' r r' oi oi' oj oj'
-        asum
-      rcases asum with ⟨ib, jb, di, di', dj, dj'⟩
-      rcases inv with ⟨tot_st, ner_st⟩
-      have ⟨icr, ner_ci⟩ := ner_st i ib
-      have ⟨jcr, ner_cj⟩ := ner_st j jb
-      have atri := tr i icr ner_ci ib
-      have atrj := tr j jcr ner_cj jb
-      split at atri
-      . split at atrj
-        rcases atri with ⟨icr', tran'i⟩
-        rcases atrj with ⟨jcr', tran'j⟩
-        split at tran'i
-        . sorry
-        . split at tran'j
-          . case isTrue hjw =>
-              rcases hjw with ⟨wj, jw⟩
-              have tran'j' := tran'j wj jw
-              rcases tran'j' with ⟨⟨_,mut_j, imut_j⟩, _⟩
-
-          -- . have h' := tot_st i j m m' r r' oi oi' oj oj'
-          --   apply h'
-          --   repeat' constructor
-          --   . exact ib
-          --   . exact jb
-          --   . simp [tran'i m r oi]
-          --     exact di
-          --   . simp [tran'i m' r' oi']
-          --     exact di'
-          --   . simp [tran'j m r oj]
-          --     exact dj
-          --   . simp [tran'j m' r' oj']
-          --     exact dj'
-    }
+-- @[invProof]
+--   theorem advance_round__a_bcast_tot :
+--     ∀ (st : @State address nodeset block vertex vertexset is_byz path),
+--       (@System address address_dec address_ne nodeset nodeset_dec nodeset_ne block block_dec
+--               block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec vertexset_ne is_byz
+--               nset vtx vset path path_dec path_ne path_ tot).assumptions
+--           st →
+--         (@System address address_dec address_ne nodeset nodeset_dec nodeset_ne block block_dec
+--                 block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec vertexset_ne is_byz
+--                 nset vtx vset path path_dec path_ne path_ tot).inv
+--             st →
+--           (@DAG.advance_round_.ext address address_dec address_ne nodeset nodeset_dec nodeset_ne
+--               block block_dec block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec
+--               vertexset_ne is_byz nset vtx vset path path_dec path_ne path_)
+--             st fun _ (st' : @State address nodeset block vertex vertexset is_byz path) =>
+--             @DAG.a_bcast_tot address address_dec address_ne nodeset nodeset_dec nodeset_ne
+--               block block_dec block_ne vertex vertex_dec vertex_ne vertexset vertexset_dec
+--               vertexset_ne is_byz nset vtx vset path path_dec path_ne path_ tot st' :=
+--     by {
+--       intros
+--         st has inv st' tr
+--         _ _ _ _ _ _ _ _
+--         i j m m' r r' oi oi' oj oj'
+--         asum
+--       rcases asum with ⟨⟨ib, jb, di, di', dj, dj'⟩, ex⟩
+--       rcases inv with ⟨tot_st, ner_st⟩
+--       have ⟨icr, ner_ci⟩ := ner_st i ib
+--       have ⟨jcr, ner_cj⟩ := ner_st j jb
+--       have atri := tr i icr ner_ci ib
+--       have atrj := tr j jcr ner_cj jb
+--       split at atri
+--       . split at atrj
+--         rcases atri with ⟨icr', tran'i⟩
+--         rcases atrj with ⟨jcr', tran'j⟩
+--         split at tran'i
+--         . sorry
+--         . split at tran'j
+--           . case isTrue hjw =>
+--               rcases hjw with ⟨wj, jw⟩
+--               have tran'j' := tran'j wj jw
+--               rcases tran'j' with ⟨α, _, _⟩
+--               rcases α with ⟨_, mutj⟩
+--               have he : ∃ (v: vertex), st.getWaveVertexLeader j wj v := by {
+--                 clear mutj
+--               }
+--           -- . have h' := tot_st i j m m' r r' oi oi' oj oj'
+--           --   apply h'
+--           --   repeat' constructor
+--           --   . exact ib
+--           --   . exact jb
+--           --   . simp [tran'i m r oi]
+--           --     exact di
+--           --   . simp [tran'i m' r' oi']
+--           --     exact di'
+--           --   . simp [tran'j m r oj]
+--           --     exact dj
+--           --   . simp [tran'j m' r' oj']
+--           --     exact dj'
+--     }
 
 
 
