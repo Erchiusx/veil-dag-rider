@@ -1,9 +1,9 @@
-name = "autobahn-veil"
+name = "veil-dag-rider"
 version = "0.1.0"
-defaultTargets = ["autobahn-veil"]
+defaultTargets = ["Main"]
 
 [[lean_lib]]
-name = "autobahn_veil"
+name = "Main"
 
 [[require]]
 name = "veil"
