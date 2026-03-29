@@ -8,4 +8,4 @@ name = "Main"
 [[require]]
 name = "veil"
 git = "https://github.com/verse-lab/veil.git"
-rev = "main"
+rev = "veil-2.0-preview"
