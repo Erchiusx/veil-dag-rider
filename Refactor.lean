@@ -1,92 +1,47 @@
 import Veil
-set_option trace.Meta.synthInstance true
+-- set_option trace.Meta.synthInstance true
 
 
-veil module DAG
+veil module DAG_TSet
 
 type node
--- instantiate inst_node: LE node
--- instantiate decLE_node: DecidableRel inst_node.le
-
--- type nodeset
--- instantiate nset: ByzNodeSet node nodeset
-
 type block
-
-abbrev round := Nat
-abbrev wave := Nat
--- immutable individual maxRound: round
--- immutable function a_bcast: node → round → block
-
 @[veil_decl]
 structure vertex (node block: Type) where
   source: node
   payload: block
-  -- round: round
 
--- @[veil_decl]
--- structure message (node block: Type) where
---   payload: (node × block × round)
---   strong: List $ (node × block × round)
---   weak: List $ (node × block × round)
+type vtxs
+type edges
+instantiate vset: TSet (vertex node block) vtxs
+instantiate eset: TSet (vertex node block × vertex node block) edges
 
 @[veil_decl]
-structure edge (node block: Type) where
-  top: vertex node block
-  bottom: vertex node block
-
-@[veil_decl]
-structure Graph (node block: Type) where
-  nodes: List $ vertex node block
-  strong: List $ edge node block
-  weak: List $ edge node block
--- strong and weak sets are pairs of edges, fst -> snd
--- we will maintain this relationship
--- function current_round: node → round
-function view: node → Graph node block
--- -- function view: node → (List $ (node × block × round))
-
-
--- relation r_bcast: node → message node block → round → Bool
--- relation r_deliver: node → message node block → round → node → Bool
-
--- relation chooseLeader: node → wave → Bool
--- function waveLeader: wave → Option node
-
--- function decidedWave: node → wave
--- relation delivered: node → (node × block × round) → Bool
-
--- relation a_deliver_at: node → block → round → node → wave → Bool
+structure Graph (vtxs edges: Type) where
+  nodes: vtxs
+  strong: edges
+  weak: edges
+function view: node → Graph vtxs edges
 #gen_state
 
 after_init {
-  -- current_round N := 0
-  view N := Graph.mk [] [] []
-
-  -- r_bcast I M R := false
-  -- r_deliver I M R K := false
-
-  -- chooseLeader N W := false
-  -- waveLeader W := none
-
-  -- decidedWave N := 0
-  -- delivered N V := false
-
-  -- a_deliver_at I M R K W := false
+  view N := Graph.mk vset.empty eset.empty eset.empty
 }
 
 action empty {
-  require True
+  return ()
 }
 
 safety [DAG_structure]
-  ∀ (n: node) (e: edge node block)
+  ∀ (n: node) (e: vertex node block × vertex node block)
   , let g := view n
-  ; e.top ∈ g.nodes
-  ∧ e ∈ g.strong ∪ g.weak
-  → e.bottom ∈ g.nodes
+  ( vset.contains e.1 g.nodes
+  ∧ ( eset.contains e g.strong
+    ∨ eset.contains e g.weak
+    )
+  → vset.contains e.2 g.nodes
+  )
 
-set_option trace.Meta.synthInstance true
 #gen_spec
 
 -- #model_check {
@@ -95,4 +50,90 @@ set_option trace.Meta.synthInstance true
 -- } {}
 #check_invariants
 
-end DAG
+end DAG_TSet
+
+veil module DAG_List
+type node
+type block
+@[veil_decl]
+structure vertex (node block: Type) where
+  source: node
+  payload: block
+
+@[veil_decl]
+structure Graph (node block: Type) where
+  nodes: List $ vertex node block
+  strong: List $ vertex node block × vertex node block
+  weak: List $ vertex node block × vertex node block
+function view: node → Graph node block
+
+#gen_state
+
+after_init {
+  view N := Graph.mk [] [] []
+}
+action empty {
+  return ()
+}
+
+safety [DAG_structure]
+  ∀ (n: node) (e: vertex node block × vertex node block)
+  , let g := view n
+  ( g.nodes.contains e.1
+  ∧ ( g.strong.contains e
+    ∨ g.weak.contains e
+    )
+  → g.nodes.contains e.2
+  )
+
+#gen_spec
+
+#check_invariants
+
+end DAG_List
+
+veil module DAG_structure_simulated_pair
+type node
+type block
+@[veil_decl]
+structure vertex (node block: Type) where
+  source: node
+  payload: block
+
+@[veil_decl]
+structure edge (node block: Type) where
+  origin: vertex node block
+  target: vertex node block
+
+@[veil_decl]
+structure Graph (node block: Type) where
+  nodes: List $ vertex node block
+  strong: List $ edge node block
+  weak: List $ edge node block
+function view: node → Graph node block
+
+#gen_state
+
+after_init {
+  view N := Graph.mk [] [] []
+}
+
+action empty {
+  return ()
+}
+
+safety [DAG_structure]
+  ∀ (n: node) (e: edge node block)
+  , let g := view n
+  ( g.nodes.contains e.origin
+  ∧ ( g.strong.contains e
+    ∨ g.weak.contains e
+    )
+  → g.nodes.contains e.target
+  )
+
+#gen_spec
+
+#check_invariants
+
+end DAG_structure_simulated_pair
