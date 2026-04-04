@@ -19,7 +19,7 @@ instantiate instw: LE wave
 instantiate decLEw: DecidableRel instw.le
 instantiate ordw: Ord wave
 
-type vtxs
+-- type vtxs
 
 @[veil_decl]
 structure vertex (address block: Type) where
@@ -30,20 +30,20 @@ deriving instance Veil.FinEncodableInjOnly for vertex
 -- instantiate instv: LE $ vertex address block
 -- instantiate decLEv: DecidableRel $ instv.le
 -- instantiate ordv: Ord $ vertex address block
-
+set_option trace.Meta.synthInstance true in
+deriving instance DecidableEq for vertex
 
 -- we need to quantify over vertices,
 -- so the round parameter is separated from the vertex type
-instantiate vset: TSet (vertex address block) vtxs
+-- instantiate vset: TSet (vertex address block) vtxs
 
 @[veil_decl]
-structure message (address block vtxs: Type) where
+structure message (address block : Type) where
   payload: vertex address block
-  strong: vtxs
-  weak: vtxs
-deriving instance Veil.Enumeration for message
-deriving instance Veil.FinEncodableInjOnly for message
--- set_option trace.Meta.synthInstance true in
+  strong: List $ vertex address block
+  weak: List $ vertex address block
+-- deriving instance Veil.Enumeration for message
+-- deriving instance Veil.FinEncodableInjOnly for message
 
 @[veil_decl]
 structure edge (address block: Type) where
@@ -52,34 +52,39 @@ structure edge (address block: Type) where
 deriving instance Veil.Enumeration for edge
 
 @[veil_decl]
-structure Graph (vtxs edge: Type) where
-  nodes: vtxs
+structure Graph (address block edge: Type) where
+  nodes: List $ vertex address block
   strong: List edge
   weak: List edge
 
 function view
   : address
-  → Graph vtxs (edge address block)
+  → Graph address block (edge address block)
 function current_round
   : address
   → round
 
 immutable function a_bcast: address → round → block
-function r_bcast
-  : address
-  → message address block vtxs
-  → Option round
-function r_deliver
-  : address
-  → message address block vtxs
-  → address
-  → Option round
-relation chooseLeader: address → wave → Bool
+-- function r_bcast
+--   : address
+--   → message address block
+--   → Option round
+function r_bcast: address → List (message address block × round)
+-- function r_deliver
+--   : address
+--   → message address block
+--   → address
+--   → Option round
+function r_deliver: address → List (message address block × address × round)
+-- relation chooseLeader: address → wave → Bool
+function chooseLeader: address → List wave
 function waveLeader: wave → Option address
 function decidedWave: address → wave
-relation a_deliver_at: address → block → round → address → wave → Bool
+-- relation a_deliver_at: address → block → round → address → wave → Bool
+function a_deliver_at: address → List (block × round × address × wave)
 
-function recvLog: address → (checked: vertex address block) → Option (round × (message address block vtxs))
+-- function recvLog: address → (checked: vertex address block) → Option (round × (message address block vtxs))
+function recvLog: address → List ((vertex address block × round × message address block))
 -- when receiving, set the `recvLog` of the vertex from the r_deliver
 relation voted: address → vertex address block → Bool
 function waveVertexLeader: address → wave → Option (vertex address block)
@@ -88,64 +93,67 @@ immutable individual f: Nat
 
 after_init {
   current_round I := 0
-  view I := Graph.mk vset.empty [] []
+  view I := Graph.mk [] [] []
 
-  r_bcast I M := none
-  r_deliver I M J := none
+  r_bcast I := []
+  r_deliver I := []
 
-  chooseLeader I W := false
+  -- chooseLeader I W := false
+  chooseLeader I := []
   waveLeader W := none
   decidedWave I := (0: wave)
 
-  a_deliver_at I B R A W := false
+  -- a_deliver_at I B R A W := false
+  a_deliver_at I := []
 
-  recvLog I V := none
+  -- recvLog I V := none
+  recvLog I := []
   voted I V := false
 
   waveVertexLeader I W := none
 }
 
-action DAG_maintain (i: address) {
-  let g := view i
-  let v
-   :| recvLog i v ≠ none
-    ∧ ¬ vset.contains v g.nodes
-  require recvLog i v ≠ none
-  require ¬ vset.contains v g.nodes
-  let mut ret := g
-  if let some (r, m) := recvLog i v then
-    if (
-      let timecheck := (r ≤ current_round i)
-      let deps := vset.union m.strong m.weak |> vset.toList
-      let depscheck :=
-        ∀ v': vertex address block
-        , v' ∈ deps
-        → vset.contains v' g.nodes
-      let majority_escape := r == 1
-      let majority :=
-        (m.strong |> vset.count) > 2 * f + 1
-      let validity :=
-        ∀ v': vertex address block
-        , v' ∈ m.strong
-        → (recvLog i v')
-          <&> ( fun (r', _) => r' + 1 == r
-          ) = some true
-      ; timecheck
-      ∧ (majority_escape ∨ majority)
-      ∧ validity
-      ∧ depscheck
-    )
-    then
-      let strong_edges
-        := vset.toList m.strong |> List.map (fun v' => edge.mk v v')
-      let weak_edges
-        := vset.toList m.weak |> List.map (fun v' => edge.mk v v')
-      ret := Graph.mk
-        (vset.insert v g.nodes)
-        (strong_edges ++ g.strong)
-        (weak_edges ++ g.weak)
-  view i := ret
-}
+-- action DAG_maintain (i: address) {
+--   let g := view i
+--   let v
+--    :| recvLog i v ≠ none
+--     ∧ ¬ vset.contains v g.nodes
+--   require recvLog i v ≠ none
+--   require ¬ vset.contains v g.nodes
+--   let mut ret := g
+--   if let some (r, m) := recvLog i v then
+--     if (
+--       let timecheck := (r ≤ current_round i)
+--       let deps := vset.union m.strong m.weak |> vset.toList
+--       let depscheck :=
+--         ∀ v': vertex address block
+--         , v' ∈ deps
+--         → vset.contains v' g.nodes
+--       let majority_escape := r == 1
+--       let majority :=
+--         (m.strong |> vset.count) > 2 * f + 1
+--       let validity :=
+--         ∀ v': vertex address block
+--         , v' ∈ m.strong
+--         → (recvLog i v')
+--           <&> ( fun (r', _) => r' + 1 == r
+--           ) = some true
+--       ; timecheck
+--       ∧ (majority_escape ∨ majority)
+--       ∧ validity
+--       ∧ depscheck
+--     )
+--     then
+--       let strong_edges
+--         := vset.toList m.strong |> List.map (fun v' => edge.mk v v')
+--       let weak_edges
+--         := vset.toList m.weak |> List.map (fun v' => edge.mk v v')
+--       ret := Graph.mk
+--         (vset.insert v g.nodes)
+--         (strong_edges ++ g.strong)
+--         (weak_edges ++ g.weak)
+--   view i := ret
+-- }
 
 -- action ReliableBroadcast (i: address) (j: address) {
 --   let m :| r_bcast i m ≠ none ∧ r_deliver j m i = none
@@ -157,7 +165,9 @@ action GlobalPerfectCoin (w: wave) {
       waveLeader w = none
     ∧ ∃ s: nodeSet
       , nset.supermajority s
-      ∧ ∀ i: address, nset.member i s → chooseLeader i w
+      ∧ ∀ i: address
+        , nset.member i s
+        → w ∈ chooseLeader i
     then
   -- let wl :| wl ∈ replicas
       let wl <- pick address
@@ -166,7 +176,9 @@ action GlobalPerfectCoin (w: wave) {
 
 action ChooseLeader (i: address) (w: wave) {
   require current_round i > 4 * (w-1)
-  chooseLeader i w := true
+  -- chooseLeader i w := true
+  if ¬ w ∈ chooseLeader i
+    then chooseLeader i := chooseLeader i |> List.insert w
   GlobalPerfectCoin w
 }
 
@@ -224,11 +236,19 @@ action getWaveVertexLeader (i: address) (w: wave) {
   let mut ret := waveVertexLeader i w
   if ret ≠ none then return ()
   if let some j := waveLeader w then
-    let v
-      :| vset.contains v g.nodes
-      && recvLog i v <&> (·.1 = 4 * (w-1) + 1) == some true
-      && v.source == j
-    ret := v
+    -- let v
+    --   :| v ∈ g.nodes
+    --   && (recvLog i |> List.find? (·.1 == v))
+    --     <&> (fun (_, r, _) => r == 4 * (w-1) + 1) == some true
+    --   && v.source == j
+    -- ret := v
+    for v in g.nodes do
+      -- if (recvLog i |> List.find? (·.1 == v)) <&> (fun (_, r, _) => r == 4 * (w-1) + 1) == some true then
+      for (checked, r, msg) in recvLog i do
+        if r == 4 * (w-1) + 1 then
+        if checked == v then
+        if v.source == j then
+          ret := v
   waveVertexLeader i w := ret
 }
 
@@ -337,7 +357,7 @@ action getWaveVertexLeader (i: address) (w: wave) {
   address := Fin (3*1+1)
   nodeSet := ByzNSet (3*1+1)
   block := Fin ((3*1+1) * 3 /- waves-/ * 4 /- 4 rounds each wave-/ )
-  vtxs := Set $ vertex (Fin 4) (Fin 48)
+  -- vtxs := Set $ vertex (Fin 4) (Fin 48)
 } {
   f := 1
   a_bcast := fun i r => Fin.ofNat 48 (4 * r + i)
