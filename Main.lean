@@ -6,15 +6,15 @@ set_option linter.dupNamespace false
 veil module DAG
 
 type address
-instantiate inst: LE address
-instantiate decLE: DecidableRel inst.le
-instantiate ord : Ord address
+-- instantiate inst: LE address
+-- instantiate decLE: DecidableRel inst.le
+-- instantiate ord : Ord address
 type nodeSet
 instantiate nset: ByzNodeSet address nodeSet
 
 type block
 abbrev round := Nat
-abbrev wave := Fin 6
+abbrev wave := Fin 3
 instantiate instw: LE wave
 instantiate decLEw: DecidableRel instw.le
 instantiate ordw: Ord wave
@@ -27,9 +27,9 @@ structure vertex (address block: Type) where
   payload: block
 deriving instance Veil.Enumeration for vertex
 deriving instance Veil.FinEncodableInjOnly for vertex
-instantiate instv: LE $ vertex address block
-instantiate decLEv: DecidableRel $ instv.le
-instantiate ordv: Ord $ vertex address block
+-- instantiate instv: LE $ vertex address block
+-- instantiate decLEv: DecidableRel $ instv.le
+-- instantiate ordv: Ord $ vertex address block
 
 
 -- we need to quantify over vertices,
@@ -56,8 +56,6 @@ structure Graph (vtxs edge: Type) where
   nodes: vtxs
   strong: List edge
   weak: List edge
-
-immutable individual replicas: List address
 
 function view
   : address
@@ -97,7 +95,7 @@ after_init {
 
   chooseLeader I W := false
   waveLeader W := none
-  decidedWave I := (0: Fin 6)
+  decidedWave I := (0: wave)
 
   a_deliver_at I B R A W := false
 
@@ -334,6 +332,16 @@ action getWaveVertexLeader (i: address) (w: wave) {
 --     l := l.insert i
 -- }
 #gen_spec
+
+#model_check {
+  address := Fin (3*1+1)
+  nodeSet := ByzNSet (3*1+1)
+  block := Fin ((3*1+1) * 3 /- waves-/ * 4 /- 4 rounds each wave-/ )
+  vtxs := Set $ vertex (Fin 4) (Fin 48)
+} {
+  f := 1
+  a_bcast := fun i r => Fin.ofNat 48 (4 * r + i)
+}
 
 end DAG
 
