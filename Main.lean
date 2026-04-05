@@ -78,7 +78,8 @@ function r_bcast: address → List (message address block × round)
 function r_deliver: address → List (message address block × address × round)
 -- relation chooseLeader: address → wave → Bool
 function chooseLeader: address → List wave
-function waveLeader: wave → Option address
+immutable -- by GlobalPerfectCoin, passed from outside
+function waveLeader: wave → address
 function decidedWave: address → wave
 -- relation a_deliver_at: address → block → round → address → wave → Bool
 function a_deliver_at: address → List (block × round × address × wave)
@@ -89,8 +90,6 @@ function recvLog: address → List ((vertex address block × round × message ad
 function voted: address → List (vertex address block)
 function waveVertexLeader: address → wave → Option (vertex address block)
 immutable individual f: Nat
-
-individual test_: Nat
 #gen_state
 
 after_init {
@@ -100,9 +99,7 @@ after_init {
   r_bcast I := []
   r_deliver I := []
 
-  -- chooseLeader I W := false
   chooseLeader I := []
-  waveLeader W := none
   decidedWave I := (0: wave)
 
   -- a_deliver_at I B R A W := false
@@ -147,41 +144,6 @@ action DAG_maintain (i: address) {
       (strong_edges ++ g.strong)
       (weak_edges ++ g.weak)
     else ga ) g
-  -- require recvLog i v ≠ none
-  -- require ¬ vset.contains v g.nodes
-  -- let mut ret := g
-  -- if let some (r, m) := recvLog i v then
-  --   if (
-  --     let timecheck := (r ≤ current_round i)
-  --     let deps := vset.union m.strong m.weak |> vset.toList
-  --     let depscheck :=
-  --       ∀ v': vertex address block
-  --       , v' ∈ deps
-  --       → vset.contains v' g.nodes
-  --     let majority_escape := r == 1
-  --     let majority :=
-  --       (m.strong |> vset.count) > 2 * f + 1
-  --     let validity :=
-  --       ∀ v': vertex address block
-  --       , v' ∈ m.strong
-  --       → (recvLog i v')
-  --         <&> ( fun (r', _) => r' + 1 == r
-  --         ) = some true
-  --     ; timecheck
-  --     ∧ (majority_escape ∨ majority)
-  --     ∧ validity
-  --     ∧ depscheck
-  --   )
-  --   then
-  --     let strong_edges
-  --       := vset.toList m.strong |> List.map (fun v' => edge.mk v v')
-  --     let weak_edges
-  --       := vset.toList m.weak |> List.map (fun v' => edge.mk v v')
-  --     ret := Graph.mk
-  --       (vset.insert v g.nodes)
-  --       (strong_edges ++ g.strong)
-  --       (weak_edges ++ g.weak)
-  -- view i := ret
 }
 
 action ReliableBroadcast (i: address) (j: address) {
@@ -193,27 +155,27 @@ action ReliableBroadcast (i: address) (j: address) {
   r_deliver j := r_deliver j |> List.insert (m, i, r)
 }
 
-action GlobalPerfectCoin (w: wave) {
-  if
-      waveLeader w = none
-    ∧ ∃ s: nodeSet
-      , nset.supermajority s
-      ∧ ∀ i: address
-        , nset.member i s
-        → w ∈ chooseLeader i
-    then
-  -- let wl :| wl ∈ replicas
-      let wl <- pick address
-      waveLeader w := some wl
-}
+-- action GlobalPerfectCoin (w: wave) {
+--   if
+--       waveLeader w = none
+    -- ∧ ∃ s: nodeSet
+    --   , nset.supermajority s
+    --   ∧ ∀ i: address
+    --     , nset.member i s
+    --     → w ∈ chooseLeader i
+--     then
+--   -- let wl :| wl ∈ replicas
+--       let wl <- pick address
+--       waveLeader w := some wl
+-- }
 
-action ChooseLeader (i: address) (w: wave) {
-  require current_round i > 4 * (w-1)
-  -- chooseLeader i w := true
-  if ¬ w ∈ chooseLeader i
-    then chooseLeader i := chooseLeader i |> List.insert w
-  GlobalPerfectCoin w
-}
+-- action ChooseLeader (i: address) (w: wave) {
+--   require current_round i > 4 * (w-1)
+--   -- chooseLeader i w := true
+--   if ¬ w ∈ chooseLeader i
+--     then chooseLeader i := chooseLeader i |> List.insert w
+--   GlobalPerfectCoin w
+-- }
 
 action recv (i: address) {
   let output :| output ∈ r_deliver i
@@ -257,51 +219,21 @@ action send (i: address) {
     let (checked, r', _) <- recvLog i
     if r' < r-1 && node == checked && (node ∉ voted i) then pure node else []
   let m := message.mk v strong weak
-    -- (g.nodes.filter
-    --   (fun v' => ((·.1 == r-1) <$> recvLog i v') = some true))
-    -- (g.nodes.filter
-    --   (fun v' => (((fun (r', _) => decide $ r' < r-1) <$> recvLog i v') = some true) ∧ voted i v' = false))
-  -- r_bcast i m := some r
   r_bcast i := r_bcast i |> List.insert (m, r)
-  -- voted i V := vset.contains V g.nodes
   voted i := g.nodes.insert v
   recvLog i := recvLog i |> List.insert (v, r, m)
-  -- let strong_edges
-  --   := vset.toList m.strong |> List.map (fun v' => edge.mk v v')
   let strong_edges := strong.map (fun v' => edge.mk v v')
-  -- let weak_edges
-  --   := vset.toList m.weak |> List.map (fun v' => edge.mk v v')
   let weak_edges := weak.map (fun v' => edge.mk v v')
-  -- view i := Graph.mk
-  --   (vset.insert v g.nodes)
-  --   (strong_edges ++ g.strong)
-  --   (weak_edges ++ g.weak)
   view i := Graph.mk (voted i) (strong_edges ++ g.strong) (weak_edges ++ g.weak)
-  -- recvLog i v := some (r, m)
 }
 
 action getWaveVertexLeader (i: address) (w: wave) {
   require w > 0
   require current_round i ≥ 4 * w
-  ChooseLeader i w
+  if w ∉ chooseLeader i then chooseLeader i := chooseLeader i |> List.insert w
   let g := view i
   let mut ret := waveVertexLeader i w
   if ret ≠ none then return ret
-  -- if let some j := waveLeader w then
-    -- let v
-    --   :| v ∈ g.nodes
-    --   && (recvLog i |> List.find? (·.1 == v))
-    --     <&> (fun (_, r, _) => r == 4 * (w-1) + 1) == some true
-    --   && v.source == j
-    -- ret := v
-    -- for v in g.nodes do
-    --   -- if (recvLog i |> List.find? (·.1 == v)) <&> (fun (_, r, _) => r == 4 * (w-1) + 1) == some true then
-    --   for (checked, r, msg) in recvLog i do
-    --     if r == 4 * (w-1) + 1 then
-    --     if checked == v then
-    --     if v.source == j then
-    --       ret := v
-  -- waveVertexLeader i w :=
   return g.nodes.foldl (fun ret v =>
         if (recvLog i).any (fun (checked, r, _)
           => r == 4 * (w-1) + 1
@@ -309,7 +241,6 @@ action getWaveVertexLeader (i: address) (w: wave) {
            ∧ some (v.source) == waveLeader w
         ) then some v else ret
       ) ret
-  -- waveVertexLeader i w := ret
 }
 
 -- ghost relation strong_path (i: address) (top bot: vertex address block) :=
@@ -416,11 +347,12 @@ partial def path
   if ur ≤ vr then false else
   (um.strong ++ um.weak).any (fun u' => path default g logs u' v)
 
-action orderVertices (i: address) (vertices: List $ vertex address block) {
+procedure orderVertices (i: address) (vertices: List $ vertex address block) {
   return ()
 }
 
 action waveReady (i: address) (w: wave) {
+  require w ∉ chooseLeader i
   require w > 0
   require current_round i ≥ 4 * w
   let wd := decidedWave i
@@ -435,14 +367,10 @@ action waveReady (i: address) (w: wave) {
   -- let vl <- findLog i v v
   let logs := recvLog i
   let findLog! := findLog? v logs
-  let vl := findLog! v
+  -- let vl := findLog! v
   -- this `getD` will never fail, v is only assisting the type;
   -- normally we should use the pattern `if let some vl := wo` ,
   -- but #gen_spec denies that??
-  -- let findLog := fun v' => ((recvLog i).find?
-  --   (fun (checked, _, _) => checked == v')).getD (v, 0, message.mk v [] [])
-    -- only call with nodes in g
-  let mut leaderStack: List $ vertex address block := []
   let sliceRound := (4: Nat) * w
   let readyVertices := (do
     let u <- g.nodes
@@ -453,30 +381,37 @@ action waveReady (i: address) (w: wave) {
   )
   let prepare := decide $ readyVertices.length ≥ 2 * f + 1
   if ¬ prepare then return ()
+  chooseLeader i := chooseLeader i |> List.insert w
   let loopWaves := (do
     let index <- List.range (w-1 - wd)
     pure $ Fin.ofNat 3 (w-1 - index)
   )
-  let (leadersStack, lastLeader) <- loopWaves.foldl
+  let chooseWaveLeaderWillReturn := fun w => decide $
+    ∃ s: nodeSet
+    , nset.supermajority s
+    ∧ ∀ j: address
+      , nset.member j s
+      → w ∈ chooseLeader j
+  let (leadersStack, _) := loopWaves.foldl
     -- since for-in loop in action does not work well,
     -- now use `foldl` and `bind` to simulate for-in
-    (fun last w' => last >>= fun ((leadersStack, v): List (vertex address block) × vertex address block) =>
-      getWaveVertexLeader i w' >>= fun v'o =>
-      match v'o with
-      | none => return (leadersStack, v)
-      | some v' =>
-        if strong_path v g logs v' v
-          then return (leadersStack.insert v', v')
-          else return (leadersStack, v)
+    -- GlobalPerfectCoin reconstruct: inline getWaveVertexLeader
+    (fun (leadersStack, v) w' =>
+      if chooseWaveLeaderWillReturn w'
+      then (leadersStack, v)
+      else
+        let v'o := g.nodes.find? (fun ve =>
+          let (checked, r', msg) := findLog! ve
+           ; checked.source == waveLeader w'
+          && r' == 4 * (w-1) + 1
+        );
+        match v'o with
+        | none => (leadersStack, v)
+        | some v' => (leadersStack.insert v', v')
     )
-    -- initial action, returns variables in loop
-    $ (pure ([v], v))
-  let mut leadersStack := [v]
-  let mut vLast := v
-  -- for w' in loopWaves veil_do
-  --   let v' <- getWaveVertexLeader i w'
-
+    ([v], v)
   decidedWave i := w
+  orderVertices i leadersStack
 }
 
 action advanceRound (i: address) {
@@ -500,10 +435,13 @@ action advanceRound (i: address) {
   address := Fin (3*1+1)
   nodeSet := ByzNSet (3*1+1)
   block := Fin ((3*1+1) * 3 /- waves-/ * 4 /- 4 rounds each wave-/ )
-  -- vtxs := Set $ vertex (Fin 4) (Fin 48)
 } {
   f := 1
   a_bcast := fun i r => Fin.ofNat 48 (4 * r + i)
+  waveLeader := fun w => match w with
+  | 0 => 1
+  | 1 => 2
+  | 2 => 1
 }
 
 -- #check_invariants
