@@ -212,28 +212,28 @@ procedure send (i: address) {
   require
     r_bcast i |> (·.all (fun (_, r') => r' ≠ r))
   require r ≠ 0
-  -- if nset.is_byz i then
-  --   let byz <- pick Bool
-  --   if byz then
-  --     let b <- pick block
-  --     let j <- pick address
-  --     let sliced := do
-  --       let v <- g.nodes
-  --       let (checked, rv, msg) <- recvLog i
-  --       guard (v == checked)
-  --       guard (rv == r)
-  --       pure v
-  --     let strong :| strong ∈ subsets sliced
-  --     let weak :| weak ∈ subsets g.nodes
-  --     let v := vertex.mk j b
-  --     let m := message.mk v strong weak
-  --     r_bcast i := r_bcast i |> .insert (m, r)
-  --     voted i := g.nodes.insert v
-  --     recvLog i := recvLog i |> .insert (v, r, m)
-  --     let strong_edges := strong.map (fun v' => edge.mk v v')
-  --     let weak_edges := weak.map (fun v' => edge.mk v v')
-  --     view i := Graph.mk (voted i) (strong_edges ++ g.strong) (weak_edges ++ g.weak)
-  --     return ()
+  if nset.is_byz i then
+    let byz <- pick Bool
+    if byz then
+      let b <- pick block
+      let j <- pick address
+      let sliced := do
+        let v <- g.nodes
+        let (checked, rv, msg) <- recvLog i
+        guard (v == checked)
+        guard (rv == r)
+        pure v
+      let strong :| strong ∈ subsets sliced
+      let weak :| weak ∈ subsets g.nodes
+      let v := vertex.mk j b
+      let m := message.mk v strong weak
+      r_bcast i := r_bcast i |> .insert (m, r)
+      voted i := g.nodes.insert v
+      recvLog i := recvLog i |> .insert (v, r, m)
+      let strong_edges := strong.map (fun v' => edge.mk v v')
+      let weak_edges := weak.map (fun v' => edge.mk v v')
+      view i := Graph.mk (voted i) (strong_edges ++ g.strong) (weak_edges ++ g.weak)
+      return ()
   let slice := do
     let (_, rv, _) <- recvLog i
     guard (rv == r - 1)
@@ -256,7 +256,7 @@ procedure send (i: address) {
   view i := Graph.mk (voted i) (strong_edges ++ g.strong) (weak_edges ++ g.weak)
 }
 
-action getWaveVertexLeader (i: address) (w: wave) {
+procedure getWaveVertexLeader (i: address) (w: wave) {
   require w > 0
   require current_round i ≥ 4 * w
   if ¬ chooseLeader i w then chooseLeader i w := true
@@ -329,7 +329,7 @@ procedure orderVertices (i: address) (vertices: List $ vertex address block) {
     return (v.payload, r, v.source)
 }
 
-action waveReady (i: address) (w: wave) {
+procedure waveReady (i: address) (w: wave) {
   if nset.is_byz i then return () -- we only care about how non-byz replicas work at waveReady
   require ¬ chooseLeader i w
   require w > 0
@@ -449,23 +449,23 @@ action advanceRound (i: address) {
     send i
 }
 
-transition byz {
-  -- choosing leader
-  True
-  ∧ ( ∀ (i: address) (w: wave)
-      , (¬ nset.is_byz i ∧ chooseLeader' i w ↔ chooseLeader i w)
-      ∨ (nset.is_byz i ∧ chooseLeader i w → chooseLeader' i w)
-    )
-  ∧ ( ∀ (i: address)
-      , (¬ nset.is_byz i ∧ current_round' i = current_round i)
-      ∨ (nset.is_byz i ∧
-          ( current_round' i = current_round i
-          ∨ current_round' i = current_round i + 1
-          ∨ current_round' i = current_round i - 1
-          )
-        )
-    )
-}
+-- transition byz {
+--   -- choosing leader
+--   True
+--   ∧ ( ∀ (i: address) (w: wave)
+--       , (¬ nset.is_byz i ∧ chooseLeader' i w ↔ chooseLeader i w)
+--       ∨ (nset.is_byz i ∧ chooseLeader i w → chooseLeader' i w)
+--     )
+--   ∧ ( ∀ (i: address)
+--       , (¬ nset.is_byz i ∧ current_round' i = current_round i)
+--       ∨ (nset.is_byz i ∧
+--           ( current_round' i = current_round i
+--           ∨ current_round' i = current_round i + 1
+--           ∨ current_round' i = current_round i - 1
+--           )
+--         )
+--     )
+-- }
 
 invariant [aggrement]
   ∀ (i j: address)
@@ -498,6 +498,8 @@ invariant [Tot]
 
 -- set_option diagnostics true
 #time #gen_spec
+
+-- #check_invariants
 
 #time #model_check {
   address := Fin (3*1+1)
