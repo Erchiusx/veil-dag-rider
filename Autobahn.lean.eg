@@ -1,0 +1,546 @@
+import Veil
+set_option linter.dupNamespace false
+
+veil module Autobahn
+
+type address
+type nodeSet
+instantiate nset: ByzNodeSet address nodeSet
+
+type block
+instantiate inst: LE block
+instantiate decLE: DecidableRel inst.le
+instantiate ord: Ord block
+
+abbrev pos := Nat
+abbrev slot := Nat
+abbrev viewNo := Nat
+
+------------------------------------------------------------------------
+-- Data layer: lane cars
+------------------------------------------------------------------------
+
+@[veil_decl]
+structure proposal (address block : Type) where
+  source  : address      -- lane owner
+  seq     : pos          -- position in lane
+  parent  : pos          -- previous position; simplified hash(parent)
+  payload : block
+deriving instance Veil.Enumeration for proposal
+-- deriving instance Veil.FinEncodableInjOnly for proposal
+
+@[veil_decl]
+structure dataVote (address block : Type) where
+  voter   : address
+  source  : address
+  seq     : pos
+  payload : block
+deriving instance Veil.Enumeration for dataVote
+-- deriving instance Veil.FinEncodableInjOnly for dataVote
+
+@[veil_decl]
+structure poa (address block : Type) where
+  source  : address
+  seq     : pos
+  payload : block
+  voters  : List address
+deriving instance Veil.Enumeration for poa
+-- deriving instance Veil.FinEncodableInjOnly for poa
+
+@[veil_decl]
+structure cutEntry (address block : Type) where
+  source  : address
+  seq     : pos
+  payload : block
+deriving instance Veil.Enumeration for cutEntry
+-- deriving instance Veil.FinEncodableInjOnly for cutEntry
+
+------------------------------------------------------------------------
+-- Consensus layer: one-slot fast path
+------------------------------------------------------------------------
+
+@[veil_decl]
+structure cproposal (address block : Type) where
+  leader : address
+  s      : slot
+  v      : viewNo
+  cut    : List (cutEntry address block)
+deriving instance Veil.Enumeration for cproposal
+-- deriving instance Veil.FinEncodableInjOnly for cproposal
+
+@[veil_decl]
+structure prepVote (address block : Type) where
+  voter : address
+  leader : address
+  s : slot
+  v : viewNo
+  cut : List (cutEntry address block)
+deriving instance Veil.Enumeration for prepVote
+-- deriving instance Veil.FinEncodableInjOnly for prepVote
+
+@[veil_decl]
+structure commitQC (address block : Type) where
+  leader : address
+  s : slot
+  v : viewNo
+  cut : List (cutEntry address block)
+  voters : List address
+deriving instance Veil.Enumeration for commitQC
+-- deriving instance Veil.FinEncodableInjOnly for commitQC
+
+------------------------------------------------------------------------
+-- Local state
+------------------------------------------------------------------------
+
+immutable function a_bcast : address → pos → block
+immutable function leaderOf : slot → viewNo → address
+immutable individual f : Nat
+
+-- local lane state
+function lane_pos : address → pos
+function optimistic : address → List (proposal address block)
+function certified : address → List (cutEntry address block)
+
+-- data-layer network queues
+function prop_bcast   : address → List (proposal address block)
+function prop_deliver : address → List (proposal address block × address)
+
+function vote_bcast   : address → List (dataVote address block × address)
+function vote_deliver : address → List (dataVote address block × address)
+
+function poa_bcast    : address → List (poa address block)
+function poa_deliver  : address → List (poa address block × address)
+
+-- local voting record: prevents double-vote for same lane position
+function data_voted : address → List (dataVote address block)
+
+-- consensus state
+function current_slot : address → slot
+function current_view : address → viewNo
+
+function prepare_bcast   : address → List (cproposal address block)
+function prepare_deliver : address → List (cproposal address block × address)
+
+function prepvote_bcast   : address → List (prepVote address block × address)
+function prepvote_deliver : address → List (prepVote address block × address)
+
+function commit_bcast   : address → List (commitQC address block)
+function commit_deliver : address → List (commitQC address block × address)
+
+function prepared : address → List (cproposal address block)
+function prep_voted : address → List (prepVote address block)
+function committed : address → List (commitQC address block)
+
+-- application delivery: payload, lane position, source, slot
+function a_deliver_at : address → List (block × pos × address × slot)
+
+veil_set_field_representation relation Veil.ArrayAsFinset
+veil_set_field_representation function Veil.ArrayAsFinmap
+
+#gen_state
+
+after_init {
+  lane_pos I := 0
+  optimistic I := []
+  certified I := []
+
+  prop_bcast I := []
+  prop_deliver I := []
+
+  vote_bcast I := []
+  vote_deliver I := []
+
+  poa_bcast I := []
+  poa_deliver I := []
+
+  data_voted I := []
+
+  current_slot I := 1
+  current_view I := 0
+
+  prepare_bcast I := []
+  prepare_deliver I := []
+
+  prepvote_bcast I := []
+  prepvote_deliver I := []
+
+  commit_bcast I := []
+  commit_deliver I := []
+
+  prepared I := []
+  prep_voted I := []
+  committed I := []
+
+  a_deliver_at I := []
+}
+
+------------------------------------------------------------------------
+-- Helpers
+------------------------------------------------------------------------
+
+def sameProposal
+  (p q : proposal address block)
+  [DecidableEq address] [DecidableEq block] : Bool :=
+  p.source == q.source
+  && p.seq == q.seq
+  && p.payload == q.payload
+
+def sameCutEntry
+  (x y : cutEntry address block)
+  [DecidableEq address] [DecidableEq block] : Bool :=
+  x.source == y.source
+  && x.seq == y.seq
+  && x.payload == y.payload
+
+def voteMatches
+  (v : dataVote address block)
+  (p : proposal address block)
+  [DecidableEq address] [DecidableEq block] : Bool :=
+  v.source == p.source
+  && v.seq == p.seq
+  && v.payload == p.payload
+
+def poaMatchesEntry
+  (q : poa address block)
+  (e : cutEntry address block)
+  [DecidableEq address] [DecidableEq block] : Bool :=
+  q.source == e.source
+  && q.seq == e.seq
+  && q.payload == e.payload
+
+def prepVoteMatches
+  (pv : prepVote address block)
+  (cp : cproposal address block)
+  [DecidableEq address] [DecidableEq block] : Bool :=
+  pv.leader == cp.leader
+  && pv.s == cp.s
+  && pv.v == cp.v
+  && pv.cut == cp.cut
+
+------------------------------------------------------------------------
+-- Data layer actions
+------------------------------------------------------------------------
+
+procedure DataSend (i : address) {
+  let next := lane_pos i + 1
+  let b := a_bcast i next
+  let p := proposal.mk i next (lane_pos i) b
+
+  -- one honest proposal per local lane position
+  if (prop_bcast i).any (fun old =>
+      old.source == i && old.seq == next
+    ) then return ()
+
+  if nset.is_byz i then
+    let equiv <- pick Bool
+    if equiv then
+      let b' <- pick block
+      let fakeSrc <- pick address
+      let fake := proposal.mk fakeSrc next (lane_pos i) b'
+      prop_bcast i := prop_bcast i |> .insert fake
+      optimistic i := optimistic i |> .insert fake
+      lane_pos i := next
+      return ()
+
+  prop_bcast i := prop_bcast i |> .insert p
+  optimistic i := optimistic i |> .insert p
+  lane_pos i := next
+}
+
+action DeliverProp (i : address) (j : address) {
+  require prop_bcast i ≠ []
+  let p :| p ∈ prop_bcast i
+  if (p, i) ∈ prop_deliver j then return ()
+  prop_deliver j := prop_deliver j |> .insert (p, i)
+}
+
+action RecvPropAndVote (i : address) {
+  require prop_deliver i ≠ []
+  let pack :| pack ∈ prop_deliver i
+  let (p, sender) := pack
+
+  -- Honest replica votes at most once per lane position.
+  if (data_voted i).any (fun v =>
+      v.source == p.source && v.seq == p.seq
+    ) then return ()
+
+  -- Simplified FIFO validity:
+  -- position 1 has parent 0; otherwise parent proposal must be known.
+  let parentOk :=
+    if p.seq == 1 then
+      p.parent == 0
+    else
+      (optimistic i).any (fun old =>
+        old.source == p.source
+        && old.seq == p.parent
+      )
+
+  if ¬ parentOk then return ()
+
+  optimistic i := optimistic i |> .insert p
+
+  let v := dataVote.mk i p.source p.seq p.payload
+  data_voted i := data_voted i |> .insert v
+  vote_bcast i := vote_bcast i |> .insert (v, p.source)
+}
+
+action DeliverDataVote (i : address) (j : address) {
+  -- voter i sends vote to lane owner j
+  require vote_bcast i ≠ []
+  let pack :| pack ∈ vote_bcast i
+  let (v, target) := pack
+  require target == j
+
+  if (v, i) ∈ vote_deliver j then return ()
+  vote_deliver j := vote_deliver j |> .insert (v, i)
+}
+
+procedure MakePoA (i : address) {
+  require optimistic i ≠ []
+  let p :| p ∈ optimistic i
+  require p.source == i
+
+  let votersRaw := do
+    let (v, sender) <- vote_deliver i
+    guard (voteMatches v p)
+    pure v.voter
+
+  let voters := votersRaw.eraseDups
+
+  -- Autobahn PoA threshold: f+1 matching votes.
+  require voters.length ≥ f + 1
+
+  let q := poa.mk i p.seq p.payload voters
+  if q ∈ poa_bcast i then return ()
+
+  poa_bcast i := poa_bcast i |> .insert q
+
+  let e := cutEntry.mk i p.seq p.payload
+  certified i := certified i |> .insert e
+}
+
+action DeliverPoA (i : address) (j : address) {
+  require poa_bcast i ≠ []
+  let q :| q ∈ poa_bcast i
+  if (q, i) ∈ poa_deliver j then return ()
+  poa_deliver j := poa_deliver j |> .insert (q, i)
+
+  let e := cutEntry.mk q.source q.seq q.payload
+  certified j := certified j |> .insert e
+}
+
+------------------------------------------------------------------------
+-- Consensus fast path
+------------------------------------------------------------------------
+
+procedure SendPrepare (i : address) {
+  let s := current_slot i
+  let v := current_view i
+  require leaderOf s v == i
+
+  -- minimal certified cut: one certified tip from every lane.
+  -- For f=1, this is 4 entries.
+  let cut := certified i
+  require cut.length ≥ 3 * f + 1
+
+  if (prepare_bcast i).any (fun old =>
+      old.s == s && old.v == v
+    ) then return ()
+
+  let cp := cproposal.mk i s v cut
+  prepare_bcast i := prepare_bcast i |> .insert cp
+  prepared i := prepared i |> .insert cp
+}
+
+action DeliverPrepare (i : address) (j : address) {
+  require prepare_bcast i ≠ []
+  let cp :| cp ∈ prepare_bcast i
+  if (cp, i) ∈ prepare_deliver j then return ()
+  prepare_deliver j := prepare_deliver j |> .insert (cp, i)
+}
+
+action RecvPrepareAndPrepVote (i : address) {
+  require prepare_deliver i ≠ []
+  let pack :| pack ∈ prepare_deliver i
+  let (cp, sender) := pack
+
+  require leaderOf cp.s cp.v == cp.leader
+  require sender == cp.leader
+
+  -- one PrepVote per slot/view for honest replicas
+  if (prep_voted i).any (fun pv =>
+      pv.s == cp.s && pv.v == cp.v
+    ) then return ()
+
+  -- cut validity: every cut entry must be locally certified by a PoA
+  let cutOk := cp.cut.all (fun e =>
+    (certified i).any (fun ce => sameCutEntry ce e)
+    ||
+    (poa_deliver i).any (fun pack =>
+      let (q, _) := pack
+      poaMatchesEntry q e
+    )
+  )
+
+  if ¬ cutOk then return ()
+
+  prepared i := prepared i |> .insert cp
+
+  let pv := prepVote.mk i cp.leader cp.s cp.v cp.cut
+  prep_voted i := prep_voted i |> .insert pv
+  prepvote_bcast i := prepvote_bcast i |> .insert (pv, cp.leader)
+}
+
+action DeliverPrepVote (i : address) (j : address) {
+  require prepvote_bcast i ≠ []
+  let pack :| pack ∈ prepvote_bcast i
+  let (pv, target) := pack
+  require target == j
+
+  if (pv, i) ∈ prepvote_deliver j then return ()
+  prepvote_deliver j := prepvote_deliver j |> .insert (pv, i)
+}
+
+procedure FormFastCommitQC (i : address) {
+  require prepare_bcast i ≠ []
+  let cp :| cp ∈ prepare_bcast i
+  require cp.leader == i
+
+  let votersRaw := do
+    let (pv, sender) <- prepvote_deliver i
+    guard (prepVoteMatches pv cp)
+    pure pv.voter
+
+  let voters := votersRaw.eraseDups
+
+  -- Fast path threshold: n PrepVotes.
+  -- Since n = 3f+1, threshold is 3f+1.
+  require voters.length ≥ 3 * f + 1
+
+  let qc := commitQC.mk i cp.s cp.v cp.cut voters
+  if qc ∈ commit_bcast i then return ()
+
+  commit_bcast i := commit_bcast i |> .insert qc
+  committed i := committed i |> .insert qc
+}
+
+action DeliverCommitQC (i : address) (j : address) {
+  require commit_bcast i ≠ []
+  let qc :| qc ∈ commit_bcast i
+  if (qc, i) ∈ commit_deliver j then return ()
+  commit_deliver j := commit_deliver j |> .insert (qc, i)
+}
+
+procedure OrderCut (i : address) (qc : commitQC address block) {
+  let old := a_deliver_at i
+
+  let entries :=
+    qc.cut.eraseDups.mergeSort
+      (fun x y => decide $ inst.le x.payload y.payload)
+
+  let fresh := do
+    let e <- entries
+    guard ((old.any (fun out =>
+      let (b, p, a, s) := out
+      b == e.payload && p == e.seq && a == e.source
+    )) == false)
+    pure (e.payload, e.seq, e.source, qc.s)
+
+  a_deliver_at i := old ++ fresh
+}
+
+action RecvCommitQC (i : address) {
+  require commit_deliver i ≠ []
+  let pack :| pack ∈ commit_deliver i
+  let (qc, sender) := pack
+
+  require sender == qc.leader
+  require qc.voters.eraseDups.length ≥ 3 * f + 1
+
+  if qc ∈ committed i then return ()
+
+  committed i := committed i |> .insert qc
+  OrderCut i qc
+
+  current_slot i := qc.s + 1
+  current_view i := 0
+}
+
+------------------------------------------------------------------------
+-- One-step driver for minimal model checking
+------------------------------------------------------------------------
+
+action TickData (i : address) {
+  DataSend i
+  MakePoA i
+}
+
+action TickConsensus (i : address) {
+  SendPrepare i
+  FormFastCommitQC i
+}
+
+------------------------------------------------------------------------
+-- Safety invariants
+------------------------------------------------------------------------
+
+-- No honest replica votes twice for the same lane position.
+invariant [DataNoDoubleVote]
+  ∀ i : address,
+  ¬ nset.is_byz i →
+    (do
+      let v <- data_voted i
+      let v' <- data_voted i
+      guard (v.source == v'.source)
+      guard (v.seq == v'.seq)
+      pure (v.payload == v'.payload)
+    ).all id
+
+-- If two honest replicas commit the same slot, they commit the same cut.
+invariant [ConsensusAgreement]
+  ∀ i j : address,
+  ¬ nset.is_byz i
+  ∧ ¬ nset.is_byz j
+  →
+    (do
+      let qc <- committed i
+      let qc' <- committed j
+      guard (qc.s == qc'.s)
+      pure (qc.cut == qc'.cut)
+    ).all id
+
+-- Delivered common blocks have the same metadata.
+invariant [OutputAgreement]
+  ∀ i j : address,
+  ¬ nset.is_byz i
+  ∧ ¬ nset.is_byz j
+  →
+    (do
+      let (b, p, a, s) <- a_deliver_at i
+      let (b', p', a', s') <- a_deliver_at j
+      guard (b == b')
+      pure (p == p' && a == a' && s == s')
+    ).all id
+
+#time #gen_spec
+
+#time #model_check {
+  address := Fin (3*1+1)
+  nodeSet := ByzNSet (3*1+1)
+
+  -- 4 replicas × a few lane positions.
+  block := Fin 32
+} {
+  f := 1
+
+  -- deterministic payload generator
+  a_bcast := fun i p => Fin.ofNat 32 (4 * p + i)
+
+  -- single-slot, single-view leader schedule
+  leaderOf := fun s v => match s with
+  | 0 => 0
+  | 1 => 0
+  | _ => 1
+}
+
+end Autobahn
