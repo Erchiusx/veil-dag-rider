@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+export LEAN_CC="${LEAN_CC:-/home/erchius/NUS/verse/veil-dag-rider/tools/lean-cc-host-glibc.sh}"
+exec /home/erchius/.elan/bin/lake "$@"

@@ -1,3 +1,5 @@
+This formalization was developed with assistance from Codex.
+
 # Simplified Autobahn Veil Model
 
 This note documents the current model in `Autobahn.lean`. The model is intentionally small: it is not a full formalization of the Autobahn paper, but a finite Veil model that keeps the safety-relevant shape of Autobahn's data availability layer, fast-path consensus, and view change.
@@ -165,10 +167,10 @@ The current core invariants are deliberately split into two groups. The first gr
 
 Paper-motivated safety invariants:
 
-- `LaneNoEquivocation`: no source broadcasts two different blocks at the same position. This is the retained form of the paper-level signed-lane consistency assumption: a replica's lane should not contain conflicting messages at the same position;
+- `LaneNoEquivocation`: no source broadcasts two different blocks at the same position. This is the retained form of the paper-level signed-lane consistency assumption: a replica's lane should not contain conflicting messages at the same position. The invariant is stronger than the paper-level Byzantine model, because this simplified formalization also applies the no-equivocation assumption to Byzantine replicas.
 - `ConsensusAgreementAcrossViews`: two committed values must agree on source, position, and payload. This is the main consensus safety property: view change must not allow conflicting committed lane tips.
 
-Model-introduced invariants for the simplification:
+Model-introduced invariants for the simplification (and especially for a canonical run):
 
 - `Position2ExtendsPosition1`: a position-2 broadcast requires a position-1 PoA for the same payload. This replaces the full DAG/tip-cut dependency structure with a two-position lane dependency;
 - `PreparedHasPoA`: every prepared value has a PoA. This connects the simplified consensus layer back to the abstracted data-availability certificate;

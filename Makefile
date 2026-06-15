@@ -1,6 +1,6 @@
 SHELL := /usr/bin/env bash
 
-LEAN_FILE ?= Autobahn-consensus-effective-codex.lean
+LEAN_FILE ?= Autobahn.lean
 MODEL_NAME ?= $(basename $(notdir $(LEAN_FILE)))
 BUILD_DIR ?= .lake/model_checker_builds/$(MODEL_NAME)
 OUT_DIR ?= model-check-output
@@ -17,14 +17,14 @@ PROGRESS_NDJSON ?= $(OUT_DIR)/$(MODEL_NAME)-progress.ndjson
 
 help:
 	@printf '%s\n' 'Targets:'
-	@printf '%s\n' '  make elaborate LEAN_FILE=Autobahn-consensus-effective-codex.lean'
+	@printf '%s\n' '  make elaborate LEAN_FILE=Autobahn.lean'
 	@printf '%s\n' '      Run lake env lean on the source file. If #model_check compiled is enabled,'
 	@printf '%s\n' '      this also asks Veil to generate .lake/model_checker_builds/<model>.'
-	@printf '%s\n' '  make compile-model LEAN_FILE=Autobahn-consensus-effective-codex.lean'
+	@printf '%s\n' '  make compile-model LEAN_FILE=Autobahn.lean'
 	@printf '%s\n' '      Compile .lake/model_checker_builds/<model>/Model.lean to Model.olean.'
-	@printf '%s\n' '  make run-model-check LEAN_FILE=Autobahn-consensus-effective-codex.lean'
+	@printf '%s\n' '  make run-model-check LEAN_FILE=Autobahn.lean'
 	@printf '%s\n' '      Run .lake/model_checker_builds/<model>/ModelCheckerMain.lean and save JSON/NDJSON.'
-	@printf '%s\n' '  make model-check LEAN_FILE=Autobahn-consensus-effective-codex.lean'
+	@printf '%s\n' '  make model-check LEAN_FILE=Autobahn.lean'
 	@printf '%s\n' '      Run elaborate, compile-model, and run-model-check.'
 	@printf '%s\n' ''
 	@printf '%s\n' 'Useful variables:'
